@@ -45,6 +45,10 @@ export function validateStoredState(value) {
     throw new Error("Stored state must identify an existing main group.");
   }
   if (!groupIds.has(value.activeGroupId)) throw new Error("Stored active group does not exist.");
+  if (value.openGroupIds !== undefined && (!Array.isArray(value.openGroupIds)
+    || value.openGroupIds.some((id) => !groupIds.has(id)))) {
+    throw new Error("Stored open groups are invalid.");
+  }
 
   const windowIds = new Set();
   value.windows.forEach((window) => {

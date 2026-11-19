@@ -3,9 +3,12 @@ import {
   createFirstRunState,
   createGroup,
   deleteGroup as deleteGroupState,
+  getOpenGroupIds,
+  groupForWindow,
   handleTabRemoved,
   handleWindowRemoved,
   isMeaningfulTab,
+  isOpenGroup,
   isRememberedTab,
   moveTab,
   planGroupSwitch,
@@ -107,8 +110,13 @@ export class WorkspaceController {
         const replacementId = crypto.randomUUID();
         const transition = deleteGroupState(state, groupId, { createId: () => replacementId });
         const layout = groupId === state.activeGroupId
-          ? planGroupSwitch({ ...transition.state, activeGroupId: groupId }, transition.state.activeGroupId, {
+          ? planGroupSwitch({
+            ...transition.state,
+            activeGroupId: groupId,
+            openGroupIds: [groupId, ...getOpenGroupIds(transition.state)],
+          }, transition.state.activeGroupId, {
             isPlaceholderUrl: this.#browser.isPlaceholderUrl,
+            keepOpenGroupIds: getOpenGroupIds(transition.state),
           })
           : null;
         const deletedRecords = state.tabs.filter((tab) => tab.groupId === groupId).map(snapshotTab);
@@ -220,7 +228,7 @@ export class WorkspaceController {
     const logicalWindow = previous.windows.find((window) => window.browserWindowId === tab.windowId);
     const candidate = findSnapshot(previous, tab, logicalWindow?.id, new Set());
     const adoptSnapshotId = candidate?.status === "closed"
-      && candidate.groupId === previous.activeGroupId
+      && isOpenGroup(previous, candidate.groupId)
       ? candidate.id
       : null;
     const managed = await this.#store.update((current) => {
@@ -228,11 +236,11 @@ export class WorkspaceController {
       if (existing) return assignTab(current, { ...tab, windowKey: logicalWindow?.id }, existing.groupId);
       const snapshot = adoptSnapshotId
         ? current.tabs.find((item) => item.id === adoptSnapshotId
-          && item.status === "closed" && item.groupId === current.activeGroupId)
+          && item.status === "closed" && isOpenGroup(current, item.groupId))
         : null;
       return snapshot
         ? adoptLiveTabSnapshot(current, snapshot, tab)
-        : assignTab(current, { ...tab, windowKey: logicalWindow?.id });
+        : assignTab(current, { ...tab, windowKey: logicalWindow?.id }, groupForWindow(current, tab.windowId));
     });
     const record = managed.tabs.find((item) => item.browserTabId === tab.id);
     if (record && !tab.pinned) await this.#browser.groupManagedTabs(managed, record.groupId, tab.windowId);
@@ -391,12 +399,13 @@ export class WorkspaceController {
     const next = await this.#store.update((current) => assignTab(
       current,
       { ...tab, windowId: attachInfo.newWindowId, index: attachInfo.newPosition, windowKey: destinationWindow?.id },
-      existing?.groupId ?? current.activeGroupId,
+      existing?.groupId ?? groupForWindow(current, attachInfo.newWindowId),
     ));
     if (existing && existing.browserWindowId !== attachInfo.newWindowId) {
       await this.#browser.groupManagedTabs(next, existing.groupId, existing.browserWindowId);
     }
-    await this.#browser.groupManagedTabs(next, existing?.groupId ?? next.activeGroupId, attachInfo.newWindowId);
+    const attached = next.tabs.find((item) => item.browserTabId === tabId);
+    await this.#browser.groupManagedTabs(next, attached?.groupId ?? next.activeGroupId, attachInfo.newWindowId);
     return next;
   }
 
@@ -412,13 +421,36 @@ export class WorkspaceController {
     if (!record) return state;
     return this.#store.update((current) => ({
       ...current,
+      // The focused open group follows the tab the user activates, so new
+      // windows join the group they are working in. Never change it mid-operation.
+      activeGroupId: !current.operations.length && isOpenGroup(current, record.groupId)
+        ? record.groupId
+        : current.activeGroupId,
       tabs: current.tabs.map((item) => item.windowId === record.windowId && item.groupId === record.groupId
         ? { ...item, lastActive: item.id === record.id }
         : item),
     }));
   }
 
-  async switchGroup(destinationGroupId) {
+  // Open a group alongside the groups already open.
+  async openGroup(groupId) {
+    await this.initialize();
+    return this.switchGroup(groupId, { keepOpenGroupIds: getOpenGroupIds(this.#store.snapshot()) });
+  }
+
+  // Close a group's tabs and windows while other open groups stay as they are.
+  async parkGroup(groupId) {
+    await this.initialize();
+    const state = this.#store.snapshot();
+    const open = getOpenGroupIds(state);
+    if (!open.includes(groupId)) return { state };
+    const others = open.filter((id) => id !== groupId);
+    if (!others.length) throw new Error("This is the only open group. Switch to another group instead.");
+    const destination = state.activeGroupId !== groupId ? state.activeGroupId : others[0];
+    return this.switchGroup(destination, { keepOpenGroupIds: others });
+  }
+
+  async switchGroup(destinationGroupId, { keepOpenGroupIds = [] } = {}) {
     await this.initialize();
     if (this.#store.snapshot().operations.length) {
       await this.#store.resumePending(this.#recoveryHandlers());
@@ -431,14 +463,18 @@ export class WorkspaceController {
       makePayload: (state) => {
         const transition = planGroupSwitch(state, destinationGroupId, {
           isPlaceholderUrl: this.#browser.isPlaceholderUrl,
+          keepOpenGroupIds,
         });
         const closeRecords = transition.closeTabs.map(snapshotTab);
         const recreateWindowRecordIds = transition.recreateWindowIds
           .map((browserWindowId) => state.windows.find((window) => window.browserWindowId === browserWindowId)?.id)
           .filter(Boolean);
         const needsRestore = transition.restoreTabs.length > 0;
+        const openGroupsUnchanged = transition.state.openGroupIds.length === getOpenGroupIds(state).length
+          && transition.state.openGroupIds.every((id) => isOpenGroup(state, id));
         return {
           destinationGroupId,
+          keepOpenGroupIds,
           requestedFocusedBrowserWindowId,
           closeRecords,
           closingTabIds: closeRecords.map((tab) => tab.browserTabId),
@@ -452,7 +488,7 @@ export class WorkspaceController {
           userClosedWindowRecordIds: [],
           createdWindowRecordIds: [],
           restoredWindowRecordIds: [],
-          noop: destinationGroupId === state.activeGroupId && !needsRestore
+          noop: destinationGroupId === state.activeGroupId && openGroupsUnchanged && !needsRestore
             && transition.discardTabIds.length === 0,
         };
       },
@@ -460,6 +496,7 @@ export class WorkspaceController {
         if (record.payload.noop) return state;
         const transition = planGroupSwitch(state, destinationGroupId, {
           isPlaceholderUrl: this.#browser.isPlaceholderUrl,
+          keepOpenGroupIds: record.payload.keepOpenGroupIds ?? [],
         });
         const closeRecordIds = new Set(record.payload.closeRecords.map((tab) => tab.id));
         return {
@@ -505,7 +542,7 @@ export class WorkspaceController {
         const movedRecord = transition.state.tabs.find((tab) => tab.id === record.id);
         const shouldClose = Number.isInteger(transition.closeBrowserTab);
         const shouldRestore = movedRecord.status === "closed"
-          && destinationGroupId === current.activeGroupId;
+          && isOpenGroup(current, destinationGroupId);
         return {
           destinationGroupId,
           recordId: record.id,
@@ -606,7 +643,7 @@ export class WorkspaceController {
           .filter((record) => forgottenRecordIds.has(record.id))
           .map((record) => record.browserTabId));
         for (const tab of state.tabs) {
-          const closedDuringRestore = tab.groupId === state.activeGroupId
+          const closedDuringRestore = isOpenGroup(state, tab.groupId)
             && ((logicalWindow && tab.windowId === logicalWindow.id
               && restoredWindowRecordIds.has(logicalWindow.id))
               || tab.browserWindowId === browserWindowId && tab.status === "open");
@@ -699,7 +736,7 @@ export class WorkspaceController {
     let state = initialState;
     const record = state.tabs.find((tab) => tab.id === closeRecord.id);
     const logicalWindow = state.windows.find((window) => window.id === closeRecord.windowId);
-    const activeTabsRemain = initialState.tabs.some((tab) => tab.groupId === initialState.activeGroupId
+    const activeTabsRemain = initialState.tabs.some((tab) => isOpenGroup(initialState, tab.groupId)
       && tab.windowId === closeRecord.windowId && tab.status === "open");
     const liveWindow = logicalWindow?.isOpen
       ? (await this.#browser.getNormalWindows()).find((window) => window.id === logicalWindow.browserWindowId)
@@ -1809,7 +1846,7 @@ export class WorkspaceController {
       const restoredWindowRecordIds = new Set(currentOperation.payload.restoredWindowRecordIds ?? []);
       const destinationWasRestored = logicalWindow && restoredWindowRecordIds.has(logicalWindow.id);
       const groupWindowRecordIds = new Set(state.tabs
-        .filter((tab) => tab.groupId === state.activeGroupId
+        .filter((tab) => isOpenGroup(state, tab.groupId)
           && (logicalWindow ? tab.windowId === logicalWindow.id : tab.browserWindowId === browserWindowId)
           && (tab.status === "open" || destinationWasRestored))
         .map((tab) => tab.id));
@@ -1979,7 +2016,7 @@ export class WorkspaceController {
     const state = this.#store.snapshot();
     const window = state.windows.find((item) => item.browserWindowId === browserWindowId && item.isOpen);
     if (!window || window.placeholderTabId !== null) return;
-    if (state.tabs.some((tab) => tab.groupId === state.activeGroupId
+    if (state.tabs.some((tab) => isOpenGroup(state, tab.groupId)
       && tab.browserWindowId === browserWindowId
       && tab.status === "open")) return;
 

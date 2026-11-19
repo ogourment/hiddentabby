@@ -27,10 +27,11 @@ function setup() {
         async set(values) { Object.assign(storageValues, values); },
       },
     },
-    windows: { onRemoved: event() },
+    windows: { onRemoved: event(), onFocusChanged: event() },
     tabs: {
       onCreated: event(), onActivated: event(), onUpdated: event(), onRemoved: event(), onAttached: event(), onMoved: event(),
       async create(properties) { managerPageCalls.push(properties.url); return { id: 1, ...properties }; },
+      async query({ windowId }) { return windowId === 7 ? [{ id: 70, windowId: 7, active: true }] : []; },
     },
     contextMenus: { onClicked: event() },
   };
@@ -38,6 +39,7 @@ function setup() {
   const controller = Object.fromEntries([
     "initialize", "onTabCreated", "onTabActivated", "onTabUpdated", "onTabRemoved", "onWindowRemoved", "onTabAttached", "onTabMoved",
     "moveTab", "deleteTab", "getState", "createGroup", "renameGroup", "recolorGroup", "reorderGroups", "deleteGroup", "switchGroup",
+    "openGroup", "parkGroup",
   ].map((name) => [name, (...args) => { calls.push([name, ...args]); return Promise.resolve({ name, args }); }]));
   registerServiceWorker(chrome, controller);
   return { chrome, calls, storageValues, controller, managerPageCalls };
@@ -161,4 +163,22 @@ test("service worker does not treat a non-manager sender as the manager tab", as
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["deleteTab", 42]]);
+});
+
+test("window focus makes the focused window's active tab drive the focused group", async () => {
+  const { chrome, calls } = setup();
+  chrome.windows.onFocusChanged.fire(-1);
+  chrome.windows.onFocusChanged.fire(7);
+  chrome.windows.onFocusChanged.fire(8);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls.filter(([name]) => name === "onTabActivated"), [["onTabActivated", { tabId: 70, windowId: 7 }]]);
+});
+
+test("open and park commands reach the controller", async () => {
+  const { chrome, calls } = setup();
+  for (const type of ["group:open", "group:park"]) {
+    await new Promise((resolve) => chrome.runtime.onMessage.fire({ type, groupId: "g2" }, {}, resolve));
+  }
+  assert.deepEqual(calls.filter(([name]) => name === "openGroup" || name === "parkGroup"),
+    [["openGroup", "g2"], ["parkGroup", "g2"]]);
 });

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Open several groups at once: each group can be opened alongside the others or parked on its own; "Show only this group" keeps the previous exclusive switch. New tabs join the group of the window they open in, and the focused group follows the window you work in.
+
 - Add an opt-in local agent bridge (native messaging) so a local CLI can list tabs and close them by ID.
 
 ## 0.2.2 — 2026-10-21

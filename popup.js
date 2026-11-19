@@ -16,7 +16,47 @@ function setStatus(message, kind = "info") {
   statusElement.dataset.kind = kind;
 }
 
-function makeGroupButton(group, state) {
+function openGroupIds(state) {
+  const ids = Array.isArray(state.openGroupIds) ? [...state.openGroupIds] : [];
+  if (!ids.includes(state.activeGroupId)) ids.unshift(state.activeGroupId);
+  return ids;
+}
+
+async function runGroupCommand(type, group, pending, done) {
+  setStatus(pending);
+  try {
+    const result = await sendCommand(type, { groupId: group.id });
+    await loadState({ preserveStatus: true });
+    setStatus(result?.failures?.length ? result.failures.join(" ") : done, result?.failures?.length ? "error" : "info");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+function makeGroupRow(group, state) {
+  const open = openGroupIds(state);
+  const isOpen = open.includes(group.id);
+  const row = document.createElement("div");
+  row.className = "group-row";
+  row.dataset.open = String(isOpen);
+  const main = makeGroupButton(group, state, isOpen);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "group-toggle";
+  toggle.textContent = isOpen ? "Park" : "Open";
+  toggle.disabled = isOpen && open.length === 1;
+  toggle.title = isOpen
+    ? (toggle.disabled ? "This is the only open group." : `Close ${group.name}'s tabs; other open groups stay.`)
+    : `Open ${group.name} alongside the open groups.`;
+  toggle.setAttribute("aria-label", `${isOpen ? "Park" : "Open"} ${group.name}`);
+  toggle.addEventListener("click", () => void (isOpen
+    ? runGroupCommand("group:park", group, `Parking ${group.name}…`, `Parked ${group.name}.`)
+    : runGroupCommand("group:open", group, `Opening ${group.name}…`, `Opened ${group.name} alongside the others.`)));
+  row.append(main, toggle);
+  return row;
+}
+
+function makeGroupButton(group, state, isOpen) {
   const tabs = state.tabs.filter((tab) => tab.groupId === group.id);
   const openCount = tabs.filter((tab) => tab.status === "open").length;
   const savedCount = tabs.length - openCount;
@@ -24,7 +64,9 @@ function makeGroupButton(group, state) {
   button.type = "button";
   button.className = "group-choice";
   button.setAttribute("aria-current", String(state.activeGroupId === group.id));
-  button.disabled = state.activeGroupId === group.id && savedCount === 0;
+  button.title = `Show only ${group.name}; other groups are parked.`;
+  const onlyOpen = isOpen && openGroupIds(state).length === 1;
+  button.disabled = state.activeGroupId === group.id && onlyOpen && savedCount === 0;
 
   const nameWrap = document.createElement("span");
   nameWrap.className = "group-name-wrap";
@@ -39,10 +81,13 @@ function makeGroupButton(group, state) {
 
   const meta = document.createElement("span");
   meta.className = "group-meta";
-  meta.textContent = savedCount ? `${openCount} open · ${savedCount} saved` : `${openCount} tab${openCount === 1 ? "" : "s"}`;
+  const counts = savedCount ? `${openCount} open · ${savedCount} saved` : `${openCount} tab${openCount === 1 ? "" : "s"}`;
+  meta.textContent = isOpen ? counts : `parked · ${tabs.length} saved`;
   button.append(nameWrap, meta);
   button.addEventListener("click", async () => {
-    setStatus(state.activeGroupId === group.id ? "Restoring saved tabs…" : `Switching to ${group.name}…`);
+    setStatus(state.activeGroupId === group.id && openGroupIds(state).length === 1
+      ? "Restoring saved tabs…"
+      : `Showing only ${group.name}…`);
     try {
       const result = await sendCommand("group:switch", { groupId: group.id });
       await loadState();
@@ -61,11 +106,11 @@ async function loadState({ preserveStatus = false } = {}) {
     if (generation !== stateLoadGeneration) return;
     const orderedGroups = [...state.groups].sort((a, b) => a.order - b.order);
     groupsElement.replaceChildren();
-    for (const group of orderedGroups) groupsElement.append(makeGroupButton(group, state));
+    for (const group of orderedGroups) groupsElement.append(makeGroupRow(group, state));
     const openWindows = state.windows.filter((window) => window.isOpen).length;
     windowCountElement.textContent = `${openWindows} window${openWindows === 1 ? "" : "s"}`;
     if (!preserveStatus) {
-      setStatus("Switching closes tabs in other groups. Page state may not survive restoration.");
+      setStatus("Open several groups at once, or click a group to show only it. Parked tabs close; page state may not survive restoration.");
     }
   } catch (error) {
     if (generation !== stateLoadGeneration) return;

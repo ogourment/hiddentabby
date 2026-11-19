@@ -255,3 +255,51 @@ h1 {
   white-space: nowrap;
   clip-path: inset(50%);
 }
+
+.group-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.group-row .group-choice {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.group-row[data-open="false"] .group-choice {
+  border-style: dashed;
+  opacity: 0.78;
+}
+
+.group-row[data-open="true"] .group-choice {
+  border-color: #3f6d61;
+}
+
+.group-row .group-choice[aria-current="true"] {
+  border-color: #6cc5a5;
+  background: #1b342f;
+}
+
+.group-toggle {
+  flex: 0 0 52px;
+  padding: 0 6px;
+  border: 1px solid #314257;
+  border-radius: 10px;
+  background: #142131;
+  color: #d5e2ef;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.group-toggle:hover:not(:disabled),
+.group-toggle:focus-visible {
+  border-color: #75c9ab;
+  outline: none;
+}
+
+.group-toggle:disabled {
+  cursor: default;
+  opacity: 0.45;
+}

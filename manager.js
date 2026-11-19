@@ -302,12 +302,12 @@ function makeGroupCard(group, index, state, windowLabels, managerTabContext) {
   title.className = "group-title";
   title.textContent = group.name;
   titleRow.append(dot, title);
-  if (state.activeGroupId === group.id) {
-    const badge = document.createElement("span");
-    badge.className = "active-badge";
-    badge.textContent = "Current";
-    titleRow.append(badge);
-  }
+  const openIds = Array.isArray(state.openGroupIds) ? state.openGroupIds : [state.activeGroupId];
+  const isOpen = openIds.includes(group.id) || state.activeGroupId === group.id;
+  const badge = document.createElement("span");
+  badge.className = isOpen ? "active-badge" : "active-badge parked-badge";
+  badge.textContent = state.activeGroupId === group.id ? "Focused" : isOpen ? "Open" : "Parked";
+  titleRow.append(badge);
   const count = document.createElement("span");
   count.className = "group-count";
   count.textContent = savedCount
@@ -361,21 +361,37 @@ function makeGroupCard(group, index, state, windowLabels, managerTabContext) {
   const actions = document.createElement("div");
   actions.className = "group-actions";
   const closedCount = groupTabs.filter((tab) => tab.status === "closed").length;
-  const isActive = state.activeGroupId === group.id;
+  const onlyOpen = isOpen && openIds.length <= 1;
   actions.append(
+    isOpen
+      ? makeButton(
+        "Park",
+        "secondary",
+        () => void refreshAfter(
+          () => command("group:park", { groupId: group.id }),
+          `Parked ${group.name}.`,
+        ),
+        onlyOpen,
+      )
+      : makeButton(
+        "Open alongside",
+        "secondary",
+        () => void refreshAfter(
+          () => command("group:open", { groupId: group.id }),
+          `Opened ${group.name} alongside the others.`,
+        ),
+      ),
     makeButton(
-      isActive
-        ? closedCount
-          ? "Restore saved tabs"
-          : "Current group"
-        : "Switch to group",
+      onlyOpen
+        ? closedCount ? "Restore saved tabs" : "Only open group"
+        : "Show only this group",
       "secondary",
       () =>
         void refreshAfter(
           () => command("group:switch", { groupId: group.id }),
-          `Showing ${group.name}.`,
+          `Showing only ${group.name}.`,
         ),
-      isActive && closedCount === 0,
+      onlyOpen && closedCount === 0,
     ),
   );
   const moveUp = makeButton(

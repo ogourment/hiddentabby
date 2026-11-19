@@ -43,6 +43,40 @@ function isBrowserNewTabPage(tab) {
     || normalized === "chrome-search://local-ntp" && parsed.pathname === "/local-ntp.html";
 }
 
+// Several groups may be open at once. `activeGroupId` is the focused open
+// group; `openGroupIds` lists every open group. States written before
+// multi-group support have no `openGroupIds` and treat the active group as the
+// only open one.
+export function getOpenGroupIds(state) {
+  const groupIds = new Set(state.groups.map((group) => group.id));
+  const ids = (Array.isArray(state.openGroupIds) ? state.openGroupIds : [])
+    .filter((id) => groupIds.has(id));
+  if (groupIds.has(state.activeGroupId) && !ids.includes(state.activeGroupId)) ids.unshift(state.activeGroupId);
+  return [...new Set(ids)];
+}
+
+export function isOpenGroup(state, groupId) {
+  return getOpenGroupIds(state).includes(groupId);
+}
+
+// The open group a new tab in this browser window should join: the open group
+// with the most open tabs in the window, else the focused group.
+export function groupForWindow(state, browserWindowId) {
+  const open = getOpenGroupIds(state);
+  const counts = new Map();
+  for (const tab of state.tabs) {
+    if (tab.status !== "open" || tab.browserWindowId !== browserWindowId || !open.includes(tab.groupId)) continue;
+    counts.set(tab.groupId, (counts.get(tab.groupId) ?? 0) + 1);
+  }
+  let best = null;
+  for (const [groupId, count] of counts) {
+    if (!best || count > best.count || (count === best.count && groupId === state.activeGroupId)) {
+      best = { groupId, count };
+    }
+  }
+  return best?.groupId ?? state.activeGroupId;
+}
+
 const TAB_GROUP_COLORS = new Set([
   "grey",
   "blue",
@@ -67,6 +101,7 @@ export function createEmptyState({ createId = () => crypto.randomUUID() } = {}) 
     version: STATE_VERSION,
     defaultGroupId: defaultGroup.id,
     activeGroupId: defaultGroup.id,
+    openGroupIds: [defaultGroup.id],
     groups: [defaultGroup],
     tabs: [],
     windows: [],
@@ -200,7 +235,8 @@ export function assignTab(state, browserTab, groupId = state.activeGroupId, opti
 export function moveTab(state, tabId, destinationGroupId) {
   requireGroup(state, destinationGroupId);
   const tab = requireTab(state, tabId);
-  const staysOpen = tab.status === "open" && destinationGroupId === state.activeGroupId;
+  const destinationOpen = isOpenGroup(state, destinationGroupId);
+  const staysOpen = tab.status === "open" && destinationOpen;
   const moved = {
     ...tab,
     groupId: destinationGroupId,
@@ -215,16 +251,32 @@ export function moveTab(state, tabId, destinationGroupId) {
         ? moved
         : candidate),
     },
-    closeBrowserTab: destinationGroupId !== state.activeGroupId && tab.status === "open"
+    closeBrowserTab: !destinationOpen && tab.status === "open"
       ? tab.browserTabId
       : null,
     shouldActivateGroup: false,
   };
 }
 
-export function planGroupSwitch(state, destinationGroupId, { isPlaceholderUrl = () => false } = {}) {
+// Plans a layout change. Without `keepOpenGroupIds` this is the classic
+// exclusive switch: only the destination stays open. With it, the destination
+// becomes the focused group and every kept group stays open too, which is how
+// "open alongside" and "park" are expressed.
+export function planGroupSwitch(state, destinationGroupId, {
+  isPlaceholderUrl = () => false,
+  keepOpenGroupIds = [],
+} = {}) {
   requireGroup(state, destinationGroupId);
-  if (destinationGroupId === state.activeGroupId) {
+  const groupIds = new Set(state.groups.map((group) => group.id));
+  const nextOpenGroupIds = [...new Set([
+    destinationGroupId,
+    ...keepOpenGroupIds.filter((id) => groupIds.has(id)),
+  ])];
+  const currentOpenGroupIds = getOpenGroupIds(state);
+  const sameOpenGroups = nextOpenGroupIds.length === currentOpenGroupIds.length
+    && nextOpenGroupIds.every((id) => currentOpenGroupIds.includes(id));
+  const openGroups = new Set(nextOpenGroupIds);
+  if (destinationGroupId === state.activeGroupId && sameOpenGroups) {
     const discardTabIds = state.tabs
       .filter((tab) => !isRememberedTab(state, tab, isPlaceholderUrl))
       .map((tab) => tab.id);
@@ -233,7 +285,11 @@ export function planGroupSwitch(state, destinationGroupId, { isPlaceholderUrl = 
       && tab.status === "closed" && isRememberedTab(state, tab, isPlaceholderUrl));
     const destinationWindowIds = new Set(restoreTabs.map((tab) => tab.windowId));
     return {
-      state: { ...state, tabs: state.tabs.filter((tab) => !discardIds.has(tab.id)) },
+      state: {
+        ...state,
+        openGroupIds: currentOpenGroupIds,
+        tabs: state.tabs.filter((tab) => !discardIds.has(tab.id)),
+      },
       closeTabs: state.tabs.filter((tab) => tab.status === "open" && discardIds.has(tab.id)),
       restoreTabs,
       placeholderWindowIds: [],
@@ -251,12 +307,13 @@ export function planGroupSwitch(state, destinationGroupId, { isPlaceholderUrl = 
     .filter((tab) => !isRememberedTab(state, tab, isPlaceholderUrl))
     .map((tab) => tab.id);
   const discardIds = new Set(discardTabIds);
-  const destinationTabs = state.tabs.filter((tab) => tab.groupId === destinationGroupId
+  const restoreTabs = state.tabs.filter((tab) => tab.groupId === destinationGroupId
+    && tab.status === "closed" && isRememberedTab(state, tab, isPlaceholderUrl));
+  const keptTabs = state.tabs.filter((tab) => openGroups.has(tab.groupId) && tab.status === "open"
     && isRememberedTab(state, tab, isPlaceholderUrl));
-  const destinationWindowIds = new Set(destinationTabs.map((tab) => tab.windowId));
+  const destinationWindowIds = new Set([...restoreTabs, ...keptTabs].map((tab) => tab.windowId));
   const closeTabs = state.tabs.filter((tab) => tab.status === "open"
-    && (tab.groupId !== destinationGroupId || discardIds.has(tab.id)));
-  const restoreTabs = destinationTabs.filter((tab) => tab.status === "closed");
+    && (!openGroups.has(tab.groupId) || discardIds.has(tab.id)));
   const openWindows = state.windows.filter((window) => window.isOpen !== false);
   const pinnedWindows = openWindows.filter((window) => (window.pinnedTabIds ?? []).length > 0);
   const keepWindowIds = new Set([
@@ -285,9 +342,10 @@ export function planGroupSwitch(state, destinationGroupId, { isPlaceholderUrl = 
     .filter((window) => destinationWindowIds.has(window.id)
       || pinnedWindows.some((pinnedWindow) => pinnedWindow.id === window.id))
     .map((window) => window.browserWindowId);
+  const restoreWindowIds = new Set(restoreTabs.map((tab) => tab.windowId));
   const recreateWindowIds = state.windows
     .filter((window) => window.isOpen === false)
-    .filter((window) => destinationWindowIds.has(window.id))
+    .filter((window) => restoreWindowIds.has(window.id))
     .map((window) => window.browserWindowId);
   const closeWindowIds = openWindows
     .filter((window) => !keepWindowIds.has(window.id))
@@ -297,6 +355,7 @@ export function planGroupSwitch(state, destinationGroupId, { isPlaceholderUrl = 
     state: {
       ...state,
       activeGroupId: destinationGroupId,
+      openGroupIds: nextOpenGroupIds,
       tabs: state.tabs.filter((tab) => !discardIds.has(tab.id)),
     },
     closeTabs,
@@ -379,9 +438,11 @@ export function deleteGroup(state, groupId, options = {}) {
   }
 
   const defaultGroupId = replacementDefault?.id ?? state.defaultGroupId;
+  const remainingOpen = getOpenGroupIds(state).filter((id) => id !== groupId);
   const activeGroupId = groupId !== state.activeGroupId
     ? state.activeGroupId
-    : defaultGroupId ?? groups[0].id;
+    : remainingOpen[0] ?? defaultGroupId ?? groups[0].id;
+  const openGroupIds = [...new Set([activeGroupId, ...remainingOpen])];
 
   return {
     state: {
@@ -390,19 +451,20 @@ export function deleteGroup(state, groupId, options = {}) {
       groups: groups.map((candidate, order) => ({ ...candidate, order })),
       tabs,
       activeGroupId,
+      openGroupIds,
     },
     closeTabs,
     deletedTabIds: state.tabs.filter((tab) => tab.groupId === groupId).map((tab) => tab.id),
     placeholderWindowIds: state.windows
       .filter((window) => window.isOpen !== false)
       .filter((window) => window.placeholderTabId === null
-        && !tabs.some((tab) => tab.groupId === activeGroupId
+        && !tabs.some((tab) => openGroupIds.includes(tab.groupId)
           && tab.browserWindowId === window.browserWindowId))
       .map((window) => window.browserWindowId),
     removePlaceholderWindowIds: state.windows
       .filter((window) => window.isOpen !== false)
       .filter((window) => window.placeholderTabId !== null
-        && tabs.some((tab) => tab.groupId === activeGroupId
+        && tabs.some((tab) => openGroupIds.includes(tab.groupId)
           && tab.browserWindowId === window.browserWindowId))
       .map((window) => window.browserWindowId),
   };
@@ -439,7 +501,7 @@ export function handleWindowRemoved(state, browserWindowId, { preserveTabs = fal
       ? { ...tab, browserTabId: null, sessionId: null, status: "closed" }
       : tab)
     : state.tabs.filter((tab) => tab.browserWindowId !== browserWindowId
-      || tab.groupId !== state.activeGroupId);
+      || !isOpenGroup(state, tab.groupId));
 
   return pruneUnreferencedWindows({
     ...state,

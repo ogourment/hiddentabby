@@ -40,6 +40,12 @@ export function registerServiceWorker(chromeApi, controller) {
     run("tab removal", controller.onTabRemoved(tabId, removeInfo));
   });
   chromeApi.windows.onRemoved.addListener((windowId) => run("window removal", controller.onWindowRemoved(windowId)));
+  chromeApi.windows.onFocusChanged?.addListener((windowId) => {
+    if (!Number.isInteger(windowId) || windowId < 0) return;
+    run("window focus", chromeApi.tabs.query({ active: true, windowId }).then(([tab]) => tab
+      ? controller.onTabActivated({ tabId: tab.id, windowId })
+      : null));
+  });
   chromeApi.tabs.onAttached.addListener((tabId, attachInfo) => {
     run("tab attachment", controller.onTabAttached(tabId, attachInfo));
   });
@@ -80,6 +86,8 @@ export function registerServiceWorker(chromeApi, controller) {
       "group:reorder": () => controller.reorderGroups(message.orderedIds),
       "group:delete": () => controller.deleteGroup(message.groupId),
       "group:switch": () => controller.switchGroup(message.groupId),
+      "group:open": () => controller.openGroup(message.groupId),
+      "group:park": () => controller.parkGroup(message.groupId),
       "tab:move": () => controller.moveTab(message.tabId, message.groupId),
       "tab:delete": () => isFullPageManagerSender
         ? controller.deleteTab(message.tabId, { managerTabId: sender.tab.id })
