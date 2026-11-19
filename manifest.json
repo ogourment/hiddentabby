@@ -3,13 +3,21 @@
   "name": "HiddenTabby",
   "version": "0.2.2",
   "description": "Organize tabs into local workspaces across windows. Tab titles and URLs stay in this browser profile.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1SSbcjchbRnkLTPUZiAJNjpfyB3w6PUNYhj1KwxIfs7SAoHX0KmvCvqAh1lss99XsYPnOMlk5UoSNSRuhwSxO6Fu97Omv2zwj2I7blbnc+g4YgWjo/CvvOPL6ax877guoPZcXFu7x2Iet2HjIxFPFwGh9miQ+H9Z9vlk+RNbTT0tR8G9vBKbJJwTlVL/nBlm4NbFv7UewN29h5UvI66Wq16VtqROYI7ckzy6PAst854bwBQD540EXbDhLM4JvBzdN5LNXXoR/pV1PwE7zWNoTYspW0azs937Xw17/DAU3UG5Bn5s4QQMBAtgJHOtHF/zP/8jU/G258HEwRRPZd9u2wIDAQAB",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["tabs", "tabGroups", "sessions", "contextMenus", "storage"],
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "sessions",
+    "contextMenus",
+    "storage",
+    "nativeMessaging"
+  ],
   "background": {
     "service_worker": "src/service-worker.js",
     "type": "module"

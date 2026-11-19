@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an opt-in local agent bridge (native messaging) so a local CLI can list tabs and close them by ID.
+
 ## 0.2.2 — 2026-10-21
 
 - Open the Workspace Manager after first installation, without reopening it on extension updates.

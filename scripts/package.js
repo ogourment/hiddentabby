@@ -24,6 +24,7 @@ const extensionFiles = [
   "icons/icon128.png",
   "assets/cat-paw-pointer.png",
   "src/service-worker.js",
+  "src/agent-bridge.js",
   "src/chrome-browser.js",
   "src/group-state.js",
   "src/pin-onboarding-state.js",
