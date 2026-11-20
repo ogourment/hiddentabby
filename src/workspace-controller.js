@@ -438,7 +438,11 @@ export class WorkspaceController {
     const result = await this.switchGroup(groupId, { keepOpenGroupIds: getOpenGroupIds(this.#store.snapshot()) });
     // A group with no tabs would otherwise open invisibly; give it a window whose new tab joins it.
     const hasOpenTab = this.#store.snapshot().tabs.some((tab) => tab.groupId === groupId && tab.status === "open");
-    if (!hasOpenTab) await this.#browser.openEmptyWindow?.();
+    if (!hasOpenTab) {
+      const created = await this.#browser.openEmptyWindow?.();
+      // Focus changes can assign the new tab to another group first; move it explicitly.
+      for (const tab of created?.tabs ?? []) await this.moveTab(tab.id, groupId);
+    }
     return result;
   }
 
