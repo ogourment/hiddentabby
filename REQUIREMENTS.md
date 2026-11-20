@@ -19,7 +19,7 @@ Build one Manifest V3 extension for Chrome and Brave that brings the main tab-or
 - Preserve group membership across browser restarts.
 - Make group definitions available across browser windows. Treat a switch as global: close tabs in inactive groups across normal windows and restore the selected group's tabs in their original windows.
 - Keep windows open across global switches with the temporary New Tab placeholder described above; it is not group content or a saved tab.
-- Avoid Chromium's native “Close tab and delete group?” prompt when closing a group's last tab in a window. Apply native tab grouping only when at least two unpinned tabs from the same HiddenTabby group are open in that window. Keep singleton tabs logically assigned to HiddenTabby but native-ungrouped; regroup when a second tab joins. Closing the singleton removes that tab/window's membership while leaving the HiddenTabby group intact.
+- Label every open managed tab natively with its HiddenTabby group, including a window's only tab, so each window shows which group it belongs to. Closing a window's last tab of a group removes that tab/window's membership while leaving the HiddenTabby group intact. Also show the current tab's group on the toolbar icon as a two-letter badge in the group's color.
 - Use the toolbar popup for group switching and provide a link from it to a full-page manager for group management.
 
 ## Platform Constraint

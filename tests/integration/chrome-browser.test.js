@@ -159,16 +159,41 @@ test("first-run native groups replace existing groups for unpinned managed tabs"
   assert.equal(windows[0].tabs.find((tab) => tab.id === 2).pinned, true);
 });
 
-test("a single managed tab is kept outside native tab groups", async () => {
+test("a single managed tab gets its group's native label", async () => {
   const { chrome, calls, windows } = fakeChrome();
   const browser = createChromeBrowserApi(chrome);
   const state = createFirstRunState(windows[0].tabs, { createId: (() => { let id = 0; return () => `s-${++id}`; })() });
 
   await browser.groupManagedTabs(state, state.activeGroupId, 10);
 
-  assert.equal(windows[0].tabs.find((tab) => tab.id === 1).groupId, -1);
-  assert.deepEqual(calls.find((call) => call[0] === "ungroup"), ["ungroup", [1]]);
-  assert.equal(calls.some((call) => call[0] === "group"), false);
+  assert.equal(calls.some((call) => call[0] === "group" && call[1].includes(1)), true);
+  assert.equal(calls.some((call) => call[0] === "ungroup"), false);
+  assert.deepEqual(calls.find((call) => call[0] === "groupUpdate")?.[2], { title: "Main", color: "grey" });
+});
+
+test("badges name each open tab's group in its color and skip unchanged tabs", async () => {
+  const { chrome } = fakeChrome();
+  const badges = [];
+  chrome.action = {
+    setBadgeText: async ({ tabId, text }) => { badges.push(["text", tabId, text]); },
+    setBadgeBackgroundColor: async ({ tabId, color }) => { badges.push(["color", tabId, color]); },
+  };
+  const browser = createChromeBrowserApi(chrome);
+  const state = {
+    groups: [{ id: "p", name: "PauseAI.ca", color: "orange" }, { id: "e", name: "Écojeux", color: "green" }],
+    tabs: [
+      { groupId: "p", status: "open", browserTabId: 7, url: "https://pauseai.ca/" },
+      { groupId: "e", status: "open", browserTabId: 8, url: "https://ecojeux.org/" },
+      { groupId: "e", status: "closed", browserTabId: null, url: "https://ecojeux.org/x" },
+    ],
+  };
+  await browser.updateBadges(state);
+  await browser.updateBadges(state);
+
+  assert.deepEqual(badges, [
+    ["text", 7, "PA"], ["color", 7, "#fa903e"],
+    ["text", 8, "ÉC"], ["color", 8, "#188038"],
+  ]);
 });
 
 test("tab grouping, placeholder creation, sessions, and tab-strip menus use the intended APIs", async () => {

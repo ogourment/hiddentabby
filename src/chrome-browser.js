@@ -1,7 +1,17 @@
+const BADGE_COLORS = {
+  grey: "#5f6368", blue: "#1a73e8", red: "#d93025", yellow: "#f9ab00", green: "#188038",
+  pink: "#d01884", purple: "#a142f4", cyan: "#007b83", orange: "#fa903e",
+};
+
+export function badgeText(name) {
+  return (String(name).match(/[\p{L}\p{N}]/gu) ?? []).slice(0, 2).join("").toUpperCase();
+}
+
 export function createChromeBrowserApi(chromeApi = globalThis.chrome) {
   if (!chromeApi?.tabs || !chromeApi?.windows || !chromeApi?.tabGroups) {
     throw new Error("Chromium tab, window, and tab-group APIs are required.");
   }
+  const badgeCache = new Map();
 
   const placeholderUrl = chromeApi.runtime.getURL("placeholder.html");
   const makePlaceholderUrl = (logicalWindowId) => {
@@ -184,10 +194,6 @@ export function createChromeBrowserApi(chromeApi = globalThis.chrome) {
       const liveTabs = await chromeApi.tabs.query({ windowId: browserWindowId });
       const tabs = liveTabs.filter((tab) => !tab.incognito && !tab.pinned && managedIds.has(tab.id));
       if (!tabs.length) return;
-      if (tabs.length === 1) {
-        if (tabs[0].groupId >= 0) await chromeApi.tabs.ungroup([tabs[0].id]);
-        return;
-      }
 
       const nativeGroupIds = new Set(tabs.filter((tab) => tab.groupId >= 0).map((tab) => tab.groupId));
       const [nativeGroupId] = nativeGroupIds;
@@ -205,6 +211,23 @@ export function createChromeBrowserApi(chromeApi = globalThis.chrome) {
           createProperties: { windowId: browserWindowId },
         });
       await chromeApi.tabGroups.update(resolvedGroupId, { title: group.name, color: group.color });
+    },
+
+    // Name each open tab's group on the toolbar icon, e.g. "PA" in the group's color.
+    async updateBadges(state) {
+      if (!chromeApi.action?.setBadgeText) return;
+      const groups = new Map(state.groups.map((group) => [group.id, group]));
+      for (const tab of state.tabs) {
+        const group = groups.get(tab.groupId);
+        if (tab.status !== "open" || !Number.isInteger(tab.browserTabId) || !group) continue;
+        const text = badgeText(group.name);
+        const color = BADGE_COLORS[group.color] ?? BADGE_COLORS.grey;
+        const key = `${text}|${color}|${tab.url}`;
+        if (badgeCache.get(tab.browserTabId) === key) continue;
+        badgeCache.set(tab.browserTabId, key);
+        await chromeApi.action.setBadgeText({ tabId: tab.browserTabId, text }).catch(() => {});
+        await chromeApi.action.setBadgeBackgroundColor({ tabId: tab.browserTabId, color }).catch(() => {});
+      }
     },
 
     async updateNativeGroups(state) {

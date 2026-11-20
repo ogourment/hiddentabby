@@ -4,7 +4,7 @@ import {
   PIN_ONBOARDING_STORAGE_KEY,
   reconcilePinOnboardingPreference,
 } from "./pin-onboarding-state.js";
-import { createChromeStorageAdapter, StateStore } from "./state-store.js";
+import { createChromeStorageAdapter, STATE_STORAGE_KEY, StateStore } from "./state-store.js";
 import { createInitialStateFactory, WorkspaceController } from "./workspace-controller.js";
 
 export function registerServiceWorker(chromeApi, controller) {
@@ -111,4 +111,12 @@ if (globalThis.chrome?.runtime?.onInstalled) {
   const controller = new WorkspaceController({ store, browser });
   registerServiceWorker(chrome, controller);
   connectAgentBridge(chrome, controller);
+  const updateBadges = (state) => browser.updateBadges(state).catch((error) => {
+    console.error("HiddenTabby badge update failed:", error);
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    const next = changes[STATE_STORAGE_KEY]?.newValue;
+    if (area === "local" && next) void updateBadges(next);
+  });
+  void controller.getState().then(updateBadges, () => {});
 }
