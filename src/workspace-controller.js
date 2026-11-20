@@ -435,7 +435,11 @@ export class WorkspaceController {
   // Open a group alongside the groups already open.
   async openGroup(groupId) {
     await this.initialize();
-    return this.switchGroup(groupId, { keepOpenGroupIds: getOpenGroupIds(this.#store.snapshot()) });
+    const result = await this.switchGroup(groupId, { keepOpenGroupIds: getOpenGroupIds(this.#store.snapshot()) });
+    // A group with no tabs would otherwise open invisibly; give it a window whose new tab joins it.
+    const hasOpenTab = this.#store.snapshot().tabs.some((tab) => tab.groupId === groupId && tab.status === "open");
+    if (!hasOpenTab) await this.#browser.openEmptyWindow?.();
+    return result;
   }
 
   // Close a group's tabs and windows while other open groups stay as they are.

@@ -136,6 +136,10 @@ export function createChromeBrowserApi(chromeApi = globalThis.chrome) {
       return chromeApi.tabs.update(tabId, { active: true });
     },
 
+    async openEmptyWindow() {
+      await chromeApi.windows.create({ focused: true });
+    },
+
     async discardTabs(tabIds) {
       if (!chromeApi.tabs.discard) return;
       for (const tabId of new Set(tabIds.filter(Number.isInteger))) {
