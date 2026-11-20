@@ -40,19 +40,24 @@ function makeGroupRow(group, state) {
   row.className = "group-row";
   row.dataset.open = String(isOpen);
   const main = makeGroupButton(group, state, isOpen);
-  const toggle = document.createElement("button");
-  toggle.type = "button";
+  const toggle = document.createElement("label");
   toggle.className = "group-toggle";
-  toggle.textContent = isOpen ? "Park" : "Open";
-  toggle.disabled = isOpen && open.length === 1;
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = isOpen;
+  checkbox.disabled = isOpen && open.length === 1;
   toggle.title = isOpen
-    ? (toggle.disabled ? "This is the only open group." : `Close ${group.name}'s tabs; other open groups stay.`)
-    : `Open ${group.name} alongside the open groups.`;
-  toggle.setAttribute("aria-label", `${isOpen ? "Park" : "Open"} ${group.name}`);
-  toggle.addEventListener("click", () => void (isOpen
-    ? runGroupCommand("group:park", group, `Parking ${group.name}…`, `Parked ${group.name}.`)
-    : runGroupCommand("group:open", group, `Opening ${group.name}…`, `Opened ${group.name} alongside the others.`)));
-  row.append(main, toggle);
+    ? (checkbox.disabled ? "This is the only open group." : `Untick to park ${group.name}; other open groups stay.`)
+    : `Tick to open ${group.name} alongside the open groups.`;
+  checkbox.setAttribute("aria-label", `${group.name} open`);
+  checkbox.addEventListener("change", () => {
+    checkbox.disabled = true;
+    void (isOpen
+      ? runGroupCommand("group:park", group, `Parking ${group.name}…`, `Parked ${group.name}.`)
+      : runGroupCommand("group:open", group, `Opening ${group.name}…`, `Opened ${group.name} alongside the others.`));
+  });
+  toggle.append(checkbox);
+  row.append(toggle, main);
   return row;
 }
 
@@ -110,7 +115,7 @@ async function loadState({ preserveStatus = false } = {}) {
     const openWindows = state.windows.filter((window) => window.isOpen).length;
     windowCountElement.textContent = `${openWindows} window${openWindows === 1 ? "" : "s"}`;
     if (!preserveStatus) {
-      setStatus("Open several groups at once, or click a group to show only it. Parked tabs close; page state may not survive restoration.");
+      setStatus("Tick the groups to keep open, or click a group to show only it. Unticked groups close their tabs; page state may not survive restoration.");
     }
   } catch (error) {
     if (generation !== stateLoadGeneration) return;

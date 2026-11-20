@@ -282,24 +282,30 @@ h1 {
 }
 
 .group-toggle {
-  flex: 0 0 52px;
-  padding: 0 6px;
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #314257;
   border-radius: 10px;
   background: #142131;
-  color: #d5e2ef;
-  font-size: 11px;
-  font-weight: 600;
   cursor: pointer;
 }
 
-.group-toggle:hover:not(:disabled),
-.group-toggle:focus-visible {
+.group-toggle:hover,
+.group-toggle:focus-within {
   border-color: #75c9ab;
-  outline: none;
 }
 
-.group-toggle:disabled {
+.group-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #6cc5a5;
+  cursor: inherit;
+}
+
+.group-toggle:has(input:disabled) {
   cursor: default;
   opacity: 0.45;
 }

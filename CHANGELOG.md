@@ -6,6 +6,8 @@
 
 - Add an opt-in local agent bridge (native messaging) so a local CLI can list tabs and close them by ID.
 
+- Switching groups no longer loads every restored tab at once: restored tabs other than the one being activated are unloaded and load when selected.
+
 ## 0.2.2 — 2026-10-21
 
 - Open the Workspace Manager after first installation, without reopening it on extension updates.
